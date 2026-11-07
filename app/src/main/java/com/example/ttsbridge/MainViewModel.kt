@@ -25,6 +25,7 @@ data class UiState(
     val voiceName: String = "",
     val rate: Float = 1f,
     val pitch: Float = 1f,
+    val wakeLockEnabled: Boolean = true,
     val testText: String = "你好，我是运行在 Android 设备上的 TTS Bridge。",
     val resultMessage: String? = null
 )
@@ -34,6 +35,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as TtsBridgeApp
     private val tts = app.ttsManager
     private val server = app.serverController
+    private val wakeLocks = app.wakeLockManager
 
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
@@ -62,6 +64,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             server.lastError.collect { e -> _ui.update { it.copy(serverError = e) } }
         }
+        viewModelScope.launch {
+            wakeLocks.enabled.collect { w -> _ui.update { it.copy(wakeLockEnabled = w) } }
+        }
     }
 
     /** 启动 / 停止 MCP 前台服务。 */
@@ -72,6 +77,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _ui.update { it.copy(addresses = McpServerController.localAddresses()) }
             McpServerService.start(getApplication())
         }
+    }
+
+    /** 唤醒锁开关（持久化）。 */
+    fun setWakeLock(enabled: Boolean) {
+        wakeLocks.setEnabled(enabled)
     }
 
     /** TTS 初始化失败后重新初始化（比如用户刚装好语音引擎）。 */

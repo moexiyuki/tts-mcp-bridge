@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PowerSettingsNew
@@ -84,7 +85,8 @@ data class MainActions(
     val setRate: (Float) -> Unit = {},
     val setPitch: (Float) -> Unit = {},
     val setLanguage: (String) -> Unit = {},
-    val retryInit: () -> Unit = {}
+    val retryInit: () -> Unit = {},
+    val setWakeLock: (Boolean) -> Unit = {}
 )
 
 private val sampleLanguages = listOf("zh-CN", "zh-TW", "en-US", "en-GB", "ja-JP", "ko-KR")
@@ -110,7 +112,7 @@ fun MainScreen(state: UiState, actions: MainActions) {
                         )
                     }
                 },
-                actions = { ToolbarMenu() },
+                actions = { ToolbarMenu(state, actions.setWakeLock) },
                 colors = TopAppBarDefaults.largeTopAppBarColors()
             )
         }
@@ -140,7 +142,7 @@ fun MainScreen(state: UiState, actions: MainActions) {
 // ---------------- 顶栏菜单：电池优化 ----------------
 
 @Composable
-private fun ToolbarMenu() {
+private fun ToolbarMenu(state: UiState, onSetWakeLock: (Boolean) -> Unit) {
     val context = LocalContext.current
     var expanded by remember { mutableStateOf(false) }
     // 每次重组（菜单展开）时重新检测，保证从设置页返回后状态是最新的
@@ -168,6 +170,18 @@ private fun ToolbarMenu() {
                 expanded = false
                 openBatteryOptimizationSettings(context)
             }
+        )
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text("唤醒锁（息屏保持响应）") },
+            leadingIcon = { Icon(Icons.Filled.Lock, contentDescription = null) },
+            trailingIcon = {
+                Switch(
+                    checked = state.wakeLockEnabled,
+                    onCheckedChange = onSetWakeLock
+                )
+            },
+            onClick = { onSetWakeLock(!state.wakeLockEnabled) }
         )
     }
 }

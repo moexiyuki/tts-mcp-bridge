@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -22,11 +21,8 @@ import com.example.ttsbridge.TtsBridgeApp
  *
  * 后台可连接的两个保障：
  * 1. 前台服务 —— 保进程优先级，不被低内存查杀，也不会被"缓存进程冻结"冻住；
- * 2. [PowerManager.WakeLock] —— 息屏/休眠后 CPU 仍工作，Ktor 事件循环能继续响应
- *    （本地回环调用同样依赖 CPU 唤醒，所以即使不经 Wi-Fi 也需要它）。
- *
- * Agent 走本地回环（127.0.0.1）时无需 WifiLock；若将来要从局域网其他设备访问，
- * 再考虑加 WifiLock 或让用户开启"睡眠时保持 WLAN 连接"。
+ * 2. 唤醒锁（见 [com.example.ttsbridge.WakeLockManager]）—— 息屏/休眠后 CPU 仍工作，
+ *    Ktor 事件循环能继续响应；是否持锁由用户在顶栏菜单的开关控制。
  */
 class McpServerService : Service() {
 
@@ -46,8 +42,6 @@ class McpServerService : Service() {
         }
     }
 
-    private var wakeLock: PowerManager.WakeLock? = null
-
     override fun onCreate() {
         super.onCreate()
         createChannel()
@@ -57,8 +51,9 @@ class McpServerService : Service() {
             buildNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         )
-        acquireWakeLock()
-        (application as TtsBridgeApp).serverController.start()
+        val app = application as TtsBridgeApp
+        app.wakeLockManager.setServiceActive(true)
+        app.serverController.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -71,28 +66,13 @@ class McpServerService : Service() {
     }
 
     override fun onDestroy() {
-        (application as TtsBridgeApp).serverController.stop()
-        releaseWakeLock()
+        val app = application as TtsBridgeApp
+        app.serverController.stop()
+        app.wakeLockManager.setServiceActive(false)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    /** 持有 WakeLock，防止息屏/休眠后 CPU 停摆导致端口"失联"。 */
-    private fun acquireWakeLock() {
-        val powerManager = getSystemService(PowerManager::class.java)
-        wakeLock = powerManager
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ttsbridge:server")
-            .apply {
-                setReferenceCounted(false)
-                acquire()
-            }
-    }
-
-    private fun releaseWakeLock() {
-        runCatching { if (wakeLock?.isHeld == true) wakeLock?.release() }
-        wakeLock = null
-    }
 
     private fun createChannel() {
         val manager = getSystemService(NotificationManager::class.java)

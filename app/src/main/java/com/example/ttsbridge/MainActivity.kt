@@ -40,7 +40,8 @@ class MainActivity : ComponentActivity() {
                         setRate = viewModel::setRate,
                         setPitch = viewModel::setPitch,
                         setLanguage = viewModel::setLanguage,
-                        retryInit = viewModel::retryInit
+                        retryInit = viewModel::retryInit,
+                        setWakeLock = viewModel::setWakeLock
                     )
                 )
             }

@@ -133,6 +133,8 @@ Android 的 Doze / 电池优化会在闲置后限制后台服务，导致 Agent 
 - **申请电池优化白名单**：弹系统对话框一次性授权（`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`）
 - **电池优化设置列表**：跳转系统电池优化页面手动调整（`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`）
 
+- **唤醒锁开关**（顶栏 `⋮` 菜单）：默认开启——即使走本地回环，息屏深度睡眠时 CPU 挂起也无法响应；纯省电场景可手动关闭。
+
 部分厂商 ROM（小米 / 华为 / OPPO 等）还需在「自启动管理」里放行。
 
 
