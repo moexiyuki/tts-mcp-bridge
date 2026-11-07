@@ -1,0 +1,118 @@
+# TTS Bridge
+
+把 Android 设备变成一台 **MCP 语音服务器**：AI Agent 通过 MCP（Model Context Protocol）调用
+`speak` 等工具，即可驱动设备的系统 TTS（TextToSpeech）开口说话。
+
+- Kotlin + Jetpack Compose + Material 3（Android 12+ 动态取色 Material You）
+- 应用图标为矢量图（Vector Drawable / 自适应图标，无 PNG）
+- 内嵌 Ktor CIO 服务器，实现 MCP **Streamable HTTP** 传输（JSON-RPC 2.0）
+- `speak` 为同步语义：返回结果时语音已播放完成，Agent 可放心串接后续动作
+- 前台服务保活：App 退到后台后端点依然在线
+
+## 架构
+
+```
+┌──────────────┐   HTTP POST /mcp (JSON-RPC 2.0)   ┌─────────────────────────────┐
+│  AI Agent    │ ────────────────────────────────▶ │ McpServerService (前台服务)  │
+│ (MCP Client) │                                   │   └─ Ktor CIO :8765         │
+└──────────────┘ ◀──────────────────────────────── │      └─ McpProtocol         │
+                            工具执行结果            │          └─ TtsManager       │
+                                                  │              └─ System TTS   │
+                                                  └─────────────────────────────┘
+```
+
+| 模块 | 职责 |
+| --- | --- |
+| `tts/TtsManager.kt` | 封装 `TextToSpeech`：同步朗读、语言/语音/语速/音调、状态流 |
+| `mcp/McpProtocol.kt` | MCP 协议：`initialize` / `tools/list` / `tools/call` / `ping` |
+| `mcp/McpServerController.kt` | Ktor 服务器生命周期、`/mcp` `/health` 路由 |
+| `mcp/McpServerService.kt` | 前台服务，保证后台可连接 |
+| `ui/MainScreen.kt` | MD3 界面：服务开关、端点展示、本地测试、工具清单 |
+| `res/drawable/ic_launcher_foreground.xml` | 矢量应用图标 |
+
+## MCP 工具一览
+
+| 工具 | 说明 | 参数 |
+| --- | --- | --- |
+| `speak` | 朗读文本（同步，播完才返回） | `text`(必填), `queue`, `language`, `voice`, `rate`, `pitch` |
+| `stop_speaking` | 立即停止朗读 | — |
+| `list_voices` | 列出可用语音 | `language`(过滤) |
+| `set_voice` | 切换语音 | `voice`(必填) |
+| `set_language` | 切换语言 | `language`(必填) |
+| `set_speech_rate` | 设置语速 0.1~4.0 | `rate`(必填) |
+| `set_pitch` | 设置音调 0.1~2.0 | `pitch`(必填) |
+| `tts_status` | 查看当前 TTS 状态 | — |
+
+## Agent 接入
+
+开启 App 内的 MCP 服务后，界面会显示设备 IP。在 MCP 客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "tts-bridge": {
+      "url": "http://<设备IP>:8765/mcp"
+    }
+  }
+}
+```
+
+只支持 stdio 的客户端（如 Claude Desktop）可以用 `mcp-remote` 桥接：
+
+```json
+{
+  "mcpServers": {
+    "tts-bridge": {
+      "command": "npx",
+      "args": ["mcp-remote", "http://<设备IP>:8765/mcp"]
+    }
+  }
+}
+```
+
+调试小抄（不开 Agent 也能测）：
+
+```bash
+# 健康检查
+curl http://<设备IP>:8765/health
+
+# 直接调 speak 工具
+curl -X POST http://<设备IP>:8765/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"speak","arguments":{"text":"你好，世界"}}}'
+```
+
+## 构建
+
+### GitHub Actions（推荐）
+
+推送/合并到 `main` 自动构建，产物在 Actions 的 Artifacts 里下载：
+
+- `tts-bridge-debug-apk`（可直接安装调试）
+- `tts-bridge-release-apk`（未签名 release，需自行签名）
+
+CI 使用 `gradle/actions/setup-gradle` 提供 Gradle 8.13。若想让仓库自带 wrapper，
+本地装好 Gradle 后执行一次 `gradle wrapper --gradle-version 8.13` 并提交即可。
+
+### 本地
+
+```bash
+gradle :app:assembleDebug        # 或 ./gradlew :app:assembleDebug
+```
+
+环境要求：JDK 17、Android SDK（compileSdk 35）、Gradle 8.13+ / AGP 8.7.3 / Kotlin 2.1.0。
+
+## 权限与限制
+
+- `INTERNET`：MCP HTTP 服务器；`FOREGROUND_SERVICE(_SPECIAL_USE)`：后台保活；
+  `POST_NOTIFICATIONS`：Android 13+ 显示服务通知
+- **服务监听整个局域网且无鉴权**，请只在可信网络使用，勿暴露公网（可自行加 Bearer Token 校验）
+- 设备需安装语音引擎（如 Google 语音服务）并下载对应语言数据
+- `minSdk 26`（Android 8.0+）
+
+## 可扩展方向
+
+- 鉴权：在 `/mcp` 校验 `Authorization: Bearer <token>`
+- 通知类工具：`notify`、`vibrate`、`show_toast`
+- SSE 反向推送：朗读进度、打断事件（Streamable HTTP 的 GET 通道）
+- 多设备：按设备名路由，或做成 Wear OS 版本

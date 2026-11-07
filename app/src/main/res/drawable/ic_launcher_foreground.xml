@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 启动图标前景：扬声器 + 声波（矢量图，无需 PNG） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 扬声器本体 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,44 h12 L58,30 L58,78 L44,64 h-12 Z" />
+
+    <!-- 声波 1 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M64,42 A13,13 0 0 1 64,66" />
+
+    <!-- 声波 2 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M70,34 A21,21 0 0 1 70,74" />
+</vector>

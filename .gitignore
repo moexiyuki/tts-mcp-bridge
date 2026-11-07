@@ -1,0 +1,20 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 常见敏感文件
+*.jks
+*.keystore
+google-services.json
+
+# 其他
+.DS_Store
+*.log

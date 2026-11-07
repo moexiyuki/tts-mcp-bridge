@@ -1,0 +1,48 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: 构建 APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # 仓库未提交 gradle-wrapper.jar 时由 CI 提供 Gradle；
+      # 若本地执行过 `gradle wrapper --gradle-version 8.13` 并提交了 wrapper，也可改用 ./gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.13"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tts-bridge-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Build release APK (unsigned)
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: tts-bridge-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
