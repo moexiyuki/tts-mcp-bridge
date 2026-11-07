@@ -18,7 +18,7 @@ class McpProtocol(private val tts: TtsManager) {
 
     companion object {
         const val SERVER_NAME = "tts-bridge"
-        const val SERVER_VERSION = "1.0.0"
+        const val SERVER_VERSION = "1.0.1"
     }
 
     /**

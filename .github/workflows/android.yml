@@ -1,9 +1,10 @@
 name: Android CI
 
 on:
+  # 任何分支 push 都自动构建
   push:
-    branches: [ main ]
-  pull_request:
+    branches: ['**']
+  # 需要时也可在 Actions 页面手动触发
   workflow_dispatch:
 
 jobs:

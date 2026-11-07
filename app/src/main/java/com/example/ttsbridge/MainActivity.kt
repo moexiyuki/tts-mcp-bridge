@@ -9,13 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Surface
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.collectAsState
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ttsbridge.ui.MainActions
@@ -45,7 +39,8 @@ class MainActivity : ComponentActivity() {
                         stopSpeaking = viewModel::stopSpeaking,
                         setRate = viewModel::setRate,
                         setPitch = viewModel::setPitch,
-                        setLanguage = viewModel::setLanguage
+                        setLanguage = viewModel::setLanguage,
+                        retryInit = viewModel::retryInit
                     )
                 )
             }

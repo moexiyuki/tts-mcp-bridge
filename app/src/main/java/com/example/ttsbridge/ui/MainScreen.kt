@@ -2,6 +2,12 @@ package com.example.ttsbridge.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings as DeviceSettings
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -26,11 +32,16 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -50,6 +61,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -68,7 +83,8 @@ data class MainActions(
     val stopSpeaking: () -> Unit = {},
     val setRate: (Float) -> Unit = {},
     val setPitch: (Float) -> Unit = {},
-    val setLanguage: (String) -> Unit = {}
+    val setLanguage: (String) -> Unit = {},
+    val retryInit: () -> Unit = {}
 )
 
 private val sampleLanguages = listOf("zh-CN", "zh-TW", "en-US", "en-GB", "ja-JP", "ko-KR")
@@ -94,6 +110,7 @@ fun MainScreen(state: UiState, actions: MainActions) {
                         )
                     }
                 },
+                actions = { ToolbarMenu() },
                 colors = TopAppBarDefaults.largeTopAppBarColors()
             )
         }
@@ -119,6 +136,81 @@ fun MainScreen(state: UiState, actions: MainActions) {
         }
     }
 }
+
+// ---------------- 顶栏菜单：电池优化 ----------------
+
+@Composable
+private fun ToolbarMenu() {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    // 每次重组（菜单展开）时重新检测，保证从设置页返回后状态是最新的
+    val whitelisted = isIgnoringBatteryOptimizations(context)
+
+    IconButton(onClick = { expanded = true }) {
+        Icon(Icons.Filled.MoreVert, contentDescription = "更多选项")
+    }
+    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenuItem(
+            text = {
+                Text(if (whitelisted) "电池优化白名单（已加入）" else "申请电池优化白名单")
+            },
+            leadingIcon = { Icon(Icons.Filled.PowerSettingsNew, contentDescription = null) },
+            enabled = !whitelisted,
+            onClick = {
+                expanded = false
+                requestIgnoreBatteryOptimizations(context)
+            }
+        )
+        DropdownMenuItem(
+            text = { Text("电池优化设置列表") },
+            leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+            onClick = {
+                expanded = false
+                openBatteryOptimizationSettings(context)
+            }
+        )
+    }
+}
+
+/** 是否已加入电池优化白名单。 */
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean =
+    runCatching {
+        context.getSystemService(PowerManager::class.java)
+            ?.isIgnoringBatteryOptimizations(context.packageName) == true
+    }.getOrDefault(false)
+
+/**
+ * 申请加入电池优化白名单：弹出系统一次性授权对话框。
+ * 厂商 ROM 不支持时回退到应用详情页手动设置。
+ */
+private fun requestIgnoreBatteryOptimizations(context: Context) {
+    val packageUri = Uri.parse("package:${context.packageName}")
+    val request = Intent(DeviceSettings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri)
+    runCatching { context.startActivity(request) }
+        .onFailure {
+            runCatching {
+                context.startActivity(
+                    Intent(DeviceSettings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri)
+                )
+            }.onFailure {
+                Toast.makeText(context, "无法打开电池优化设置", Toast.LENGTH_SHORT).show()
+            }
+        }
+}
+
+/** 打开系统电池优化设置列表。厂商 ROM 不支持时回退到系统设置首页。 */
+private fun openBatteryOptimizationSettings(context: Context) {
+    runCatching {
+        context.startActivity(Intent(DeviceSettings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+    }.onFailure {
+        runCatching { context.startActivity(Intent(DeviceSettings.ACTION_SETTINGS)) }
+            .onFailure {
+                Toast.makeText(context, "无法打开系统设置", Toast.LENGTH_SHORT).show()
+            }
+    }
+}
+
+// ---------------- 页面卡片 ----------------
 
 @Composable
 private fun ServerCard(state: UiState, onToggle: () -> Unit) {
@@ -180,7 +272,7 @@ private fun ServerCard(state: UiState, onToggle: () -> Unit) {
                 if (state.addresses.size > 1) {
                     Text(
                         "其他地址：" + state.addresses.drop(1)
-                            .joinToString("  ") { "http://it:${state.port}/mcp" },
+                            .joinToString("  ") { "http://${it}:${state.port}/mcp" },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -200,6 +292,8 @@ private fun ServerCard(state: UiState, onToggle: () -> Unit) {
 
 @Composable
 private fun TestCard(state: UiState, actions: MainActions) {
+    val context = LocalContext.current
+
     OutlinedCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -279,6 +373,29 @@ private fun TestCard(state: UiState, actions: MainActions) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // 初始化失败：显示原因 + 提供重试和系统语音设置入口
+            state.initError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            if (!state.ready) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    FilledTonalButton(onClick = actions.retryInit) {
+                        Text("重新初始化 TTS")
+                    }
+                    OutlinedButton(onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent("com.android.settings.TTS_SETTINGS")
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }
+                    }) {
+                        Text("打开语音设置")
+                    }
+                }
+            }
+
             state.resultMessage?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
             }

@@ -25,7 +25,9 @@ data class TtsState(
     val rate: Float = 1f,
     val pitch: Float = 1f,
     val languageTag: String = "zh-CN",
-    val voiceName: String = ""
+    val voiceName: String = "",
+    /** 初始化失败原因；null 表示无错误。 */
+    val initError: String? = null
 )
 
 /** 统一的操作结果。 */
@@ -36,8 +38,13 @@ data class TtsResult(val ok: Boolean, val message: String)
  *
  * 1. 所有 TTS 调用都切回主线程执行（TTS 要求带 Looper 的线程）；
  * 2. [speak] 是同步语义：挂起直到语音真正播完（或超时 / 被打断），
- *    这样 Agent 能拿到"已播完"的可靠回执，而不是"已提交"；
- * 3. 通过 [StateFlow] 把状态推给 UI 层。
+ *    这样 Agent 能拿到"已播完"的可靠回执；
+ * 3. 通过 [StateFlow] 把状态（含初始化错误）推给 UI 层；
+ * 4. [retryInit] 支持初始化失败后重建引擎。
+ *
+ * 注意：Android 11+ 必须在 AndroidManifest 声明
+ * `<queries><intent><action android:name="android.intent.action.TTS_SERVICE"/></intent></queries>`，
+ * 否则查不到系统语音引擎，onInit 会一直返回 ERROR。
  */
 class TtsManager(context: Context) {
 
@@ -45,8 +52,9 @@ class TtsManager(context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var tts: TextToSpeech? = null
 
-    /** 初始化结果，多个协程可同时等待。 */
-    private val initDeferred = CompletableDeferred<Boolean>()
+    /** 初始化结果信号，多个协程可同时等待；retryInit 时会重置。 */
+    @Volatile
+    private var initDeferred = CompletableDeferred<Boolean>()
 
     /** utteranceId -> 播完信号。 */
     private val pending = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
@@ -82,39 +90,62 @@ class TtsManager(context: Context) {
     }
 
     init {
-        mainHandler.post {
-            val engine = TextToSpeech(appContext) { status ->
-                if (status == TextToSpeech.SUCCESS) {
-                    val t = tts
-                    t?.setOnUtteranceProgressListener(utteranceListener)
-                    t?.setSpeechRate(rate)
-                    t?.setPitch(pitch)
-                    val langResult = t?.setLanguage(Locale.forLanguageTag(languageTag))
-                    if (langResult == TextToSpeech.LANG_MISSING_DATA ||
-                        langResult == TextToSpeech.LANG_NOT_SUPPORTED
-                    ) {
-                        languageTag = t?.language?.toLanguageTag() ?: languageTag
-                    }
-                    voiceName = t?.voice?.name ?: ""
-                    _state.update {
-                        it.copy(
-                            ready = true,
-                            engineName = t?.defaultEngine ?: "system",
-                            languageTag = languageTag,
-                            voiceName = voiceName
-                        )
-                    }
-                    initDeferred.complete(true)
-                } else {
-                    initDeferred.complete(false)
-                }
+        mainHandler.post { createEngine() }
+    }
+
+    /** 创建（或重建）TTS 引擎。必须在主线程调用。 */
+    private fun createEngine() {
+        runCatching { tts?.shutdown() }
+        tts = null
+        tts = TextToSpeech(appContext) { status -> onInit(status) }
+    }
+
+    private fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val t = tts ?: return
+            t.setOnUtteranceProgressListener(utteranceListener)
+            t.setSpeechRate(rate)
+            t.setPitch(pitch)
+            val langResult = t.setLanguage(Locale.forLanguageTag(languageTag))
+            if (langResult == TextToSpeech.LANG_MISSING_DATA ||
+                langResult == TextToSpeech.LANG_NOT_SUPPORTED
+            ) {
+                languageTag = t.language?.toLanguageTag() ?: languageTag
             }
-            tts = engine
+            voiceName = t.voice?.name ?: ""
+            _state.update {
+                it.copy(
+                    ready = true,
+                    engineName = t.defaultEngine ?: "system",
+                    languageTag = languageTag,
+                    voiceName = voiceName,
+                    initError = null
+                )
+            }
+            initDeferred.complete(true)
+        } else {
+            val message = "TTS 初始化失败（status=$status）：未找到可用的语音引擎。" +
+                "请安装语音引擎（如 Google 语音服务）并下载语言数据，然后点『重新初始化 TTS』"
+            _state.update { it.copy(ready = false, engineName = "", initError = message) }
+            initDeferred.complete(false)
         }
+    }
+
+    /** 初始化失败后重建引擎（例如用户刚装好语音引擎 / 下载完语音数据）。 */
+    fun retryInit() {
+        if (_state.value.ready) return
+        initDeferred.complete(false) // 让还在等待的调用先返回失败
+        initDeferred = CompletableDeferred() // 重置初始化信号
+        _state.update { it.copy(initError = null) }
+        mainHandler.post { createEngine() }
     }
 
     private suspend fun awaitReady(): Boolean =
         withTimeoutOrNull(15_000) { initDeferred.await() } ?: false
+
+    private fun notReadyMessage(): String =
+        _state.value.initError
+            ?: "TTS 引擎未就绪（初始化超时）。请确认设备已安装语音引擎，然后点『重新初始化 TTS』"
 
     /**
      * 朗读文本并挂起直到播完。
@@ -135,7 +166,7 @@ class TtsManager(context: Context) {
         timeoutMs: Long = 180_000
     ): TtsResult {
         if (text.isBlank()) return TtsResult(false, "文本为空，未朗读")
-        if (!awaitReady()) return TtsResult(false, "TTS 引擎未就绪（设备可能没有可用的语音引擎）")
+        if (!awaitReady()) return TtsResult(false, notReadyMessage())
 
         language?.let { setLanguage(it) }
         voice?.let { setVoice(it) }
@@ -194,12 +225,12 @@ class TtsManager(context: Context) {
     }
 
     suspend fun setLanguage(tag: String): TtsResult {
-        if (!awaitReady()) return TtsResult(false, "TTS 引擎未就绪")
+        if (!awaitReady()) return TtsResult(false, notReadyMessage())
         val code = withContext(Dispatchers.Main) {
             tts?.setLanguage(Locale.forLanguageTag(tag)) ?: TextToSpeech.ERROR
         }
         return when (code) {
-            TextToSpeech.LANG_MISSING_DATA -> TtsResult(false, "缺少语言数据：$tag")
+            TextToSpeech.LANG_MISSING_DATA -> TtsResult(false, "缺少语言数据：$tag（请到语音设置下载）")
             TextToSpeech.LANG_NOT_SUPPORTED -> TtsResult(false, "引擎不支持语言：$tag")
             else -> {
                 languageTag = tag
@@ -211,7 +242,7 @@ class TtsManager(context: Context) {
     }
 
     suspend fun setVoice(name: String): TtsResult {
-        if (!awaitReady()) return TtsResult(false, "TTS 引擎未就绪")
+        if (!awaitReady()) return TtsResult(false, notReadyMessage())
         val target = withContext(Dispatchers.Main) {
             tts?.voices?.firstOrNull { it.name == name }
         } ?: return TtsResult(false, "找不到语音：$name（用 list_voices 查看可用语音）")
@@ -223,7 +254,7 @@ class TtsManager(context: Context) {
     }
 
     suspend fun setRate(value: Float): TtsResult {
-        if (!awaitReady()) return TtsResult(false, "TTS 引擎未就绪")
+        if (!awaitReady()) return TtsResult(false, notReadyMessage())
         val v = value.coerceIn(0.1f, 4.0f)
         withContext(Dispatchers.Main) { tts?.setSpeechRate(v) }
         rate = v
@@ -232,7 +263,7 @@ class TtsManager(context: Context) {
     }
 
     suspend fun setPitch(value: Float): TtsResult {
-        if (!awaitReady()) return TtsResult(false, "TTS 引擎未就绪")
+        if (!awaitReady()) return TtsResult(false, notReadyMessage())
         val v = value.coerceIn(0.1f, 2.0f)
         withContext(Dispatchers.Main) { tts?.setPitch(v) }
         pitch = v
@@ -241,7 +272,7 @@ class TtsManager(context: Context) {
     }
 
     suspend fun listVoices(language: String? = null): String {
-        if (!awaitReady()) return "TTS 引擎未就绪"
+        if (!awaitReady()) return notReadyMessage()
         val all = withContext(Dispatchers.Main) {
             (tts?.voices ?: emptySet()).sortedWith(compareBy({ it.locale.toLanguageTag() }, { -it.quality }))
         }
@@ -255,7 +286,7 @@ class TtsManager(context: Context) {
             appendLine("共 ${filtered.size} 个语音：")
             filtered.forEach { v ->
                 append("- ${v.name} | ${v.locale.toLanguageTag()} | quality=${v.quality} | latency=${v.latency}")
-                if (v.features.isNotEmpty()) append(" | ${v.features.joinToString(",")}")
+                if (v.features?.isNotEmpty() == true) append(" | ${v.features.joinToString(",")}")
                 appendLine()
             }
         }
@@ -265,6 +296,7 @@ class TtsManager(context: Context) {
         val s = _state.value
         return buildString {
             appendLine("ready: ${s.ready}")
+            s.initError?.let { appendLine("initError: $it") }
             appendLine("engine: ${s.engineName.ifEmpty { "未知" }}")
             appendLine("speaking: ${s.speaking}")
             appendLine("language: ${s.languageTag}")

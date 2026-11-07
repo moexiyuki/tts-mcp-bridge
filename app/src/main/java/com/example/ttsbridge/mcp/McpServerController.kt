@@ -3,7 +3,6 @@ package com.example.ttsbridge.mcp
 import com.example.ttsbridge.tts.TtsManager
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.ApplicationCall
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.request.receiveText

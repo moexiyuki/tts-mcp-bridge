@@ -23,7 +23,7 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `tts/TtsManager.kt` | 封装 `TextToSpeech`：同步朗读、语言/语音/语速/音调、状态流 |
+| `tts/TtsManager.kt` | 封装 `TextToSpeech`：同步朗读、语言/语音/语速/音调、状态流、失败重试 |
 | `mcp/McpProtocol.kt` | MCP 协议：`initialize` / `tools/list` / `tools/call` / `ping` |
 | `mcp/McpServerController.kt` | Ktor 服务器生命周期、`/mcp` `/health` 路由 |
 | `mcp/McpServerService.kt` | 前台服务，保证后台可连接 |
@@ -101,6 +101,40 @@ gradle :app:assembleDebug        # 或 ./gradlew :app:assembleDebug
 ```
 
 环境要求：JDK 17、Android SDK（compileSdk 35）、Gradle 8.13+ / AGP 8.7.3 / Kotlin 2.1.0。
+
+## 故障排查
+
+**一直显示"TTS 引擎未就绪" / 无法朗读**
+
+1. `AndroidManifest.xml` 必须声明包可见性（Android 11+ 查不到引擎是头号原因，本项目已含）：
+   ```xml
+   <queries>
+       <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+   </queries>
+   ```
+   没有它，`TextToSpeech.onInit` 会稳定收到 `ERROR`，无论设备装没装引擎。
+2. 确认设备装有语音引擎（Google 语音服务 / 讯飞等），并在「系统设置 → 语音」下载好语言数据。
+3. 装好后回到 App 点「重新初始化 TTS」，界面会显示真实错误原因（如有）。
+4. `set_language` 报"缺少语言数据"→ 到语音设置下载对应语言包。
+
+**朗读没声音**
+
+- 检查媒体音量（TTS 走媒体音轨）；`set_speech_rate` 别调过快；部分引擎对空文本/纯符号会静默跳过。
+
+**Agent 连不上**
+
+- 手机和 Agent 设备同一局域网；`curl http://<设备IP>:8765/health` 应返回 `{"status":"ok",...}`；
+- 关闭代理/VPN 对局域网的劫持；部分公司网络会隔离客户端。
+
+## 后台保活
+
+Android 的 Doze / 电池优化会在闲置后限制后台服务，导致 Agent 连不上。App 顶栏 `⋮` 菜单提供：
+
+- **申请电池优化白名单**：弹系统对话框一次性授权（`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`）
+- **电池优化设置列表**：跳转系统电池优化页面手动调整（`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`）
+
+部分厂商 ROM（小米 / 华为 / OPPO 等）还需在「自启动管理」里放行。
+
 
 ## 权限与限制
 

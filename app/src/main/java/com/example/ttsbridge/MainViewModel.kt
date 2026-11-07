@@ -18,6 +18,7 @@ data class UiState(
     val port: Int = McpServerController.DEFAULT_PORT,
     val addresses: List<String> = emptyList(),
     val ready: Boolean = false,
+    val initError: String? = null,
     val engineName: String = "",
     val speaking: Boolean = false,
     val languageTag: String = "zh-CN",
@@ -44,6 +45,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _ui.update {
                     it.copy(
                         ready = s.ready,
+                        initError = s.initError,
                         engineName = s.engineName,
                         speaking = s.speaking,
                         languageTag = s.languageTag,
@@ -70,6 +72,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _ui.update { it.copy(addresses = McpServerController.localAddresses()) }
             McpServerService.start(getApplication())
         }
+    }
+
+    /** TTS 初始化失败后重新初始化（比如用户刚装好语音引擎）。 */
+    fun retryInit() {
+        tts.retryInit()
     }
 
     fun setTestText(text: String) {
